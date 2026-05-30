@@ -2,7 +2,27 @@ import type Phaser from "phaser"
 import { Orientation } from "./orientation"
 
 const FPS = 36
-const FRAME_SCAN_MAX = 24
+
+function frameDuration(action: "Idle" | "Walk" | "Attack"): number {
+  const frameMul = action === "Walk" ? 2 : action === "Attack" ? 1.5 : 4
+  return (1000 / FPS) * frameMul
+}
+
+/** Collect atlas frame names that exist — avoids Phaser warnings from generateFrameNames gaps. */
+function collectFrames(
+  scene: Phaser.Scene,
+  textureKey: string,
+  prefix: string
+): Phaser.Types.Animations.AnimationFrame[] {
+  if (!scene.textures.exists(textureKey)) return []
+
+  const names = scene.textures.get(textureKey).getFrameNames()
+  const matching = names
+    .filter((name) => name.startsWith(prefix))
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+
+  return matching.map((frame) => ({ key: textureKey, frame }))
+}
 
 function registerDirectionalAnim(
   scene: Phaser.Scene,
@@ -12,18 +32,12 @@ function registerDirectionalAnim(
 ) {
   for (const direction of Object.values(Orientation)) {
     const prefix = `${tint}/${action}/Anim/${direction}/`
-    const frames = scene.anims.generateFrameNames(index, {
-      start: 0,
-      end: FRAME_SCAN_MAX,
-      zeroPad: 4,
-      prefix
-    })
-
+    const frames = collectFrames(scene, index, prefix)
     if (frames.length === 0) continue
 
-    const frameMul = action === "Walk" ? 2 : action === "Attack" ? 1.5 : 4
-    for (let i = 0; i < frames.length; i++) {
-      frames[i]!.duration = (1000 / FPS) * frameMul
+    const duration = frameDuration(action)
+    for (const frame of frames) {
+      frame.duration = duration
     }
 
     const key = `${index}/${tint}/${action}/Anim/${direction}`
@@ -37,6 +51,14 @@ function registerDirectionalAnim(
   }
 }
 
+function hasAnyFrames(scene: Phaser.Scene, index: string, prefix: string): boolean {
+  if (!scene.textures.exists(index)) return false
+  return scene.textures
+    .get(index)
+    .getFrameNames()
+    .some((name) => name.startsWith(prefix))
+}
+
 export function registerPokemonAnims(
   scene: Phaser.Scene,
   index: string,
@@ -44,7 +66,9 @@ export function registerPokemonAnims(
 ) {
   registerDirectionalAnim(scene, index, "Idle", tint)
   registerDirectionalAnim(scene, index, "Walk", tint)
-  registerDirectionalAnim(scene, index, "Attack", tint)
+  if (hasAnyFrames(scene, index, `${tint}/Attack/Anim/`)) {
+    registerDirectionalAnim(scene, index, "Attack", tint)
+  }
 }
 
 export function playFacingAnim(
@@ -68,7 +92,10 @@ export function playFacingAnim(
     return
   }
 
-  sprite.setFrame(`Normal/Idle/Anim/${direction}/0000`)
+  const idleFrame = `Normal/Idle/Anim/${direction}/0000`
+  if (sprite.texture.key === index && sprite.scene.textures.get(index).has(idleFrame)) {
+    sprite.setFrame(idleFrame)
+  }
 }
 
 export function playAttackAnim(
@@ -78,10 +105,6 @@ export function playAttackAnim(
 ): boolean {
   const key = `${index}/Normal/Attack/Anim/${direction}`
   if (!sprite.scene.anims.exists(key)) {
-    const idleKey = `${index}/Normal/Idle/Anim/${direction}`
-    if (sprite.scene.anims.exists(idleKey)) {
-      sprite.anims.play(idleKey, false)
-    }
     return false
   }
   sprite.anims.play(key, false)

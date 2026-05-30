@@ -1,6 +1,7 @@
 import Phaser from "phaser"
 import WasdScene from "./WasdScene"
 import { initActionHud } from "./actionHud"
+import { initAttackHotbar } from "./attackHotbar"
 import { initSwapHud } from "./swapHud"
 
 const parent = document.getElementById("game")
@@ -25,4 +26,5 @@ const game = new Phaser.Game({
 game.events.on("wasd-scene-ready", (scene: WasdScene) => {
   initSwapHud(scene)
   initActionHud(scene)
+  initAttackHotbar(scene)
 })

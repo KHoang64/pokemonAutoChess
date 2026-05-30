@@ -1,5 +1,10 @@
 import Phaser from "phaser"
-import { ensureAbilitiesAtlas, playEvolutionVfx } from "./abilitiesVfx"
+import {
+  ensureAbilitiesAtlas,
+  playEvolutionVfx,
+  playMoveVfx,
+  type HotbarMoveId
+} from "./abilitiesVfx"
 import { loadPokemonAtlas } from "./loadPokemonAtlas"
 import { orientationFromVelocity, Orientation } from "./orientation"
 import {
@@ -32,6 +37,7 @@ export default class WasdScene extends Phaser.Scene {
   private statusText!: Phaser.GameObjects.Text
   private swapping = false
   private attacking = false
+  private selectedMove: HotbarMoveId = "razor_leaf"
   private walkBounds = { minX: 40, minY: 40, maxX: 1560, maxY: 1160 }
 
   constructor() {
@@ -46,18 +52,9 @@ export default class WasdScene extends Phaser.Scene {
       `/assets/pokemons/${DEFAULT_POKEMON.index}.json`,
       "/assets/pokemons/"
     )
-    this.load.multiatlas(
-      "abilities",
-      "/assets/abilities/abilities.json",
-      "/assets/abilities/"
-    )
-
     this.load.on("loaderror", (file: { key: string }) => {
       if (file.key === "town_tileset") {
         console.warn("[prototype-wasd] town_tileset.png missing")
-      }
-      if (file.key === "abilities") {
-        console.warn("[prototype-wasd] abilities atlas missing — evolution VFX disabled")
       }
     })
   }
@@ -101,7 +98,7 @@ export default class WasdScene extends Phaser.Scene {
     this.keyShift = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT)
     this.keySpace = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE)
 
-    this.registerAbilitiesVfx()
+    void ensureAbilitiesAtlas(this)
 
     const cam = this.cameras.main
     cam.setBounds(0, 0, boundsW, boundsH)
@@ -129,22 +126,9 @@ export default class WasdScene extends Phaser.Scene {
     this.game.events.emit("wasd-scene-ready", this)
   }
 
-  private registerAbilitiesVfx() {
-    if (!this.textures.exists("abilities")) return
-    if (!this.anims.exists("EVOLUTION")) {
-      this.anims.create({
-        key: "EVOLUTION",
-        frames: this.anims.generateFrameNames("abilities", {
-          start: 0,
-          end: 7,
-          zeroPad: 3,
-          prefix: "EVOLUTION/",
-          suffix: ".png"
-        }),
-        duration: 100,
-        repeat: 0
-      })
-    }
+  setSelectedMove(move: HotbarMoveId) {
+    this.selectedMove = move
+    this.refreshHud()
   }
 
   private setupWheelZoom() {
@@ -170,8 +154,7 @@ export default class WasdScene extends Phaser.Scene {
 
   async playEvolutionVfx() {
     try {
-      await ensureAbilitiesAtlas(this)
-      this.registerAbilitiesVfx()
+      if (!(await ensureAbilitiesAtlas(this))) return
       playEvolutionVfx(this, this.player.x, this.player.y)
       const facing =
         (this.player.getData("facing") as Orientation) ?? Orientation.DOWN
@@ -183,21 +166,21 @@ export default class WasdScene extends Phaser.Scene {
     }
   }
 
-  private tryAttack() {
-    if (
-      this.attacking ||
-      this.swapping ||
-      this.pokemonIndex === "placeholder-pokemon"
-    ) {
-      return
-    }
+  async useSelectedMove() {
+    if (this.attacking || this.swapping) return
 
     const facing =
       (this.player.getData("facing") as Orientation) ?? Orientation.DOWN
-    const played = playAttackAnim(this.player, this.pokemonIndex, facing)
-    if (played) {
-      this.attacking = true
+
+    if (this.selectedMove === "strike") {
+      if (this.pokemonIndex === "placeholder-pokemon") return
+      const played = playAttackAnim(this.player, this.pokemonIndex, facing)
+      if (played) this.attacking = true
+      return
     }
+
+    if (!(await ensureAbilitiesAtlas(this))) return
+    playMoveVfx(this, this.selectedMove, this.player.x, this.player.y, facing)
   }
 
   async swapToPokemon(index: string, label: string) {
@@ -263,7 +246,7 @@ export default class WasdScene extends Phaser.Scene {
       ? "Map: Treasure Town"
       : "Map: fallback (town PNG missing)"
     this.statusText.setText(
-      `${mapLine}\nSprite: ${spriteLine}\nWASD · Shift run · Space attack · scroll zoom`
+      `${mapLine}\nSprite: ${spriteLine}\nMove: ${this.selectedMove.replace("_", " ")}\nWASD · Shift run · Space · scroll zoom`
     )
   }
 
@@ -308,7 +291,7 @@ export default class WasdScene extends Phaser.Scene {
     if (!this.player) return
 
     if (Phaser.Input.Keyboard.JustDown(this.keySpace)) {
-      this.tryAttack()
+      void this.useSelectedMove()
     }
 
     if (!this.attacking) {

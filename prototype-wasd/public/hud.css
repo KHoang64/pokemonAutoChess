@@ -100,3 +100,47 @@
   opacity: 0.7;
   font-family: monospace;
 }
+
+.attack-hotbar {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(20, 30, 45, 0.92);
+  border: 2px solid #6eb5ff;
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45);
+}
+
+.attack-slot {
+  min-width: 96px;
+  padding: 10px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #e8f4ff;
+  background: #2a3d52;
+  border: 2px solid #3d5a73;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.attack-slot:hover {
+  background: #354f68;
+  border-color: #6eb5ff;
+}
+
+.attack-slot.active {
+  background: #2d5a87;
+  border-color: #9ed0ff;
+  box-shadow: 0 0 0 2px rgba(110, 181, 255, 0.35);
+}
+
+.attack-slot-label {
+  display: block;
+  text-align: center;
+}

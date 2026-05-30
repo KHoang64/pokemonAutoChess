@@ -43,7 +43,9 @@ function parentAssetsPlugin(): Plugin {
       return
     }
 
-    next()
+    res.statusCode = 404
+    res.setHeader("Content-Type", "text/plain")
+    res.end(`Asset not found: ${urlPath}`)
   }
 
   return {
