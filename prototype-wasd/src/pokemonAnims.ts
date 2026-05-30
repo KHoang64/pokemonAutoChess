@@ -7,7 +7,7 @@ const FRAME_SCAN_MAX = 24
 function registerDirectionalAnim(
   scene: Phaser.Scene,
   index: string,
-  action: "Idle" | "Walk",
+  action: "Idle" | "Walk" | "Attack",
   tint: "Normal" | "Shiny" = "Normal"
 ) {
   for (const direction of Object.values(Orientation)) {
@@ -21,8 +21,9 @@ function registerDirectionalAnim(
 
     if (frames.length === 0) continue
 
+    const frameMul = action === "Walk" ? 2 : action === "Attack" ? 1.5 : 4
     for (let i = 0; i < frames.length; i++) {
-      frames[i]!.duration = (1000 / FPS) * (action === "Walk" ? 2 : 4)
+      frames[i]!.duration = (1000 / FPS) * frameMul
     }
 
     const key = `${index}/${tint}/${action}/Anim/${direction}`
@@ -30,7 +31,7 @@ function registerDirectionalAnim(
       scene.anims.create({
         key,
         frames,
-        repeat: -1
+        repeat: action === "Idle" || action === "Walk" ? -1 : 0
       })
     }
   }
@@ -43,6 +44,7 @@ export function registerPokemonAnims(
 ) {
   registerDirectionalAnim(scene, index, "Idle", tint)
   registerDirectionalAnim(scene, index, "Walk", tint)
+  registerDirectionalAnim(scene, index, "Attack", tint)
 }
 
 export function playFacingAnim(
@@ -67,4 +69,21 @@ export function playFacingAnim(
   }
 
   sprite.setFrame(`Normal/Idle/Anim/${direction}/0000`)
+}
+
+export function playAttackAnim(
+  sprite: Phaser.GameObjects.Sprite,
+  index: string,
+  direction: Orientation
+): boolean {
+  const key = `${index}/Normal/Attack/Anim/${direction}`
+  if (!sprite.scene.anims.exists(key)) {
+    const idleKey = `${index}/Normal/Idle/Anim/${direction}`
+    if (sprite.scene.anims.exists(idleKey)) {
+      sprite.anims.play(idleKey, false)
+    }
+    return false
+  }
+  sprite.anims.play(key, false)
+  return true
 }

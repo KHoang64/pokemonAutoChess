@@ -1,7 +1,12 @@
 import Phaser from "phaser"
+import { ensureAbilitiesAtlas, playEvolutionVfx } from "./abilitiesVfx"
 import { loadPokemonAtlas } from "./loadPokemonAtlas"
 import { orientationFromVelocity, Orientation } from "./orientation"
-import { playFacingAnim, registerPokemonAnims } from "./pokemonAnims"
+import {
+  playAttackAnim,
+  playFacingAnim,
+  registerPokemonAnims
+} from "./pokemonAnims"
 import { DEFAULT_POKEMON } from "./pokemon-roster"
 
 const WALK_SPEED = 140
@@ -10,6 +15,7 @@ const MAP_SCALE = 2
 const ZOOM_MIN = 0.5
 const ZOOM_MAX = 2
 const ZOOM_STEP = 0.1
+const MAP_MARGIN = 40
 
 export default class WasdScene extends Phaser.Scene {
   player!: Phaser.GameObjects.Sprite
@@ -18,12 +24,15 @@ export default class WasdScene extends Phaser.Scene {
   private keyS!: Phaser.Input.Keyboard.Key
   private keyD!: Phaser.Input.Keyboard.Key
   private keyShift!: Phaser.Input.Keyboard.Key
+  private keySpace!: Phaser.Input.Keyboard.Key
   pokemonIndex = "placeholder-pokemon"
   currentLabel = DEFAULT_POKEMON.label
   private map?: Phaser.Tilemaps.Tilemap
   private mapLoaded = false
   private statusText!: Phaser.GameObjects.Text
   private swapping = false
+  private attacking = false
+  private walkBounds = { minX: 40, minY: 40, maxX: 1560, maxY: 1160 }
 
   constructor() {
     super({ key: "WasdScene" })
@@ -37,10 +46,18 @@ export default class WasdScene extends Phaser.Scene {
       `/assets/pokemons/${DEFAULT_POKEMON.index}.json`,
       "/assets/pokemons/"
     )
+    this.load.multiatlas(
+      "abilities",
+      "/assets/abilities/abilities.json",
+      "/assets/abilities/"
+    )
 
     this.load.on("loaderror", (file: { key: string }) => {
       if (file.key === "town_tileset") {
         console.warn("[prototype-wasd] town_tileset.png missing")
+      }
+      if (file.key === "abilities") {
+        console.warn("[prototype-wasd] abilities atlas missing — evolution VFX disabled")
       }
     })
   }
@@ -59,6 +76,12 @@ export default class WasdScene extends Phaser.Scene {
 
     this.mapLoaded = this.createTownMap()
     const { startX, startY, boundsW, boundsH } = this.getSpawnAndBounds()
+    this.walkBounds = {
+      minX: MAP_MARGIN,
+      minY: MAP_MARGIN,
+      maxX: boundsW - MAP_MARGIN,
+      maxY: boundsH - MAP_MARGIN
+    }
 
     this.pokemonIndex = this.ensurePlaceholderTexture()
     this.player = this.add.sprite(startX, startY, this.pokemonIndex)
@@ -76,6 +99,9 @@ export default class WasdScene extends Phaser.Scene {
     this.keyS = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S)
     this.keyD = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D)
     this.keyShift = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT)
+    this.keySpace = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE)
+
+    this.registerAbilitiesVfx()
 
     const cam = this.cameras.main
     cam.setBounds(0, 0, boundsW, boundsH)
@@ -84,6 +110,14 @@ export default class WasdScene extends Phaser.Scene {
     cam.setZoom(1)
 
     this.setupWheelZoom()
+
+    this.player.on(Phaser.Animations.Events.ANIMATION_COMPLETE, () => {
+      if (!this.attacking) return
+      this.attacking = false
+      const facing =
+        (this.player.getData("facing") as Orientation) ?? Orientation.DOWN
+      playFacingAnim(this.player, this.pokemonIndex, facing, false)
+    })
 
     if (this.textures.exists(DEFAULT_POKEMON.index)) {
       this.applyPokemonSprite(DEFAULT_POKEMON.index, DEFAULT_POKEMON.label)
@@ -95,8 +129,33 @@ export default class WasdScene extends Phaser.Scene {
     this.game.events.emit("wasd-scene-ready", this)
   }
 
+  private registerAbilitiesVfx() {
+    if (!this.textures.exists("abilities")) return
+    if (!this.anims.exists("EVOLUTION")) {
+      this.anims.create({
+        key: "EVOLUTION",
+        frames: this.anims.generateFrameNames("abilities", {
+          start: 0,
+          end: 7,
+          zeroPad: 3,
+          prefix: "EVOLUTION/",
+          suffix: ".png"
+        }),
+        duration: 100,
+        repeat: 0
+      })
+    }
+  }
+
   private setupWheelZoom() {
-    this.input.on("wheel", (_pointer, _objects, _deltaX, deltaY) => {
+    this.input.on(
+      "wheel",
+      (
+        _pointer: unknown,
+        _objects: unknown,
+        _deltaX: number,
+        deltaY: number
+      ) => {
       const cam = this.cameras.main
       const next = Phaser.Math.Clamp(
         cam.zoom + Math.sign(deltaY) * ZOOM_STEP,
@@ -105,7 +164,40 @@ export default class WasdScene extends Phaser.Scene {
       )
       cam.setZoom(next)
       this.refreshHud()
-    })
+      }
+    )
+  }
+
+  async playEvolutionVfx() {
+    try {
+      await ensureAbilitiesAtlas(this)
+      this.registerAbilitiesVfx()
+      playEvolutionVfx(this, this.player.x, this.player.y)
+      const facing =
+        (this.player.getData("facing") as Orientation) ?? Orientation.DOWN
+      if (this.pokemonIndex !== "placeholder-pokemon") {
+        playFacingAnim(this.player, this.pokemonIndex, facing, false)
+      }
+    } catch (err) {
+      console.warn("[prototype-wasd] Evolution VFX failed:", err)
+    }
+  }
+
+  private tryAttack() {
+    if (
+      this.attacking ||
+      this.swapping ||
+      this.pokemonIndex === "placeholder-pokemon"
+    ) {
+      return
+    }
+
+    const facing =
+      (this.player.getData("facing") as Orientation) ?? Orientation.DOWN
+    const played = playAttackAnim(this.player, this.pokemonIndex, facing)
+    if (played) {
+      this.attacking = true
+    }
   }
 
   async swapToPokemon(index: string, label: string) {
@@ -171,7 +263,7 @@ export default class WasdScene extends Phaser.Scene {
       ? "Map: Treasure Town"
       : "Map: fallback (town PNG missing)"
     this.statusText.setText(
-      `${mapLine}\nSprite: ${spriteLine}\nWASD move · Shift run · scroll zoom · Swap button`
+      `${mapLine}\nSprite: ${spriteLine}\nWASD · Shift run · Space attack · scroll zoom`
     )
   }
 
@@ -185,9 +277,17 @@ export default class WasdScene extends Phaser.Scene {
     if (!tileset) return false
 
     for (const layerName of ["layer0", "layer1", "layer2"]) {
-      this.map.createLayer(layerName, tileset, 0, 0)?.setScale(MAP_SCALE, MAP_SCALE)
+      this.map
+        .createLayer(layerName, tileset, 0, 0)
+        ?.setScale(MAP_SCALE, MAP_SCALE)
     }
     return true
+  }
+
+  private clampToMap() {
+    const b = this.walkBounds
+    this.player.x = Phaser.Math.Clamp(this.player.x, b.minX, b.maxX)
+    this.player.y = Phaser.Math.Clamp(this.player.y, b.minY, b.maxY)
   }
 
   private ensurePlaceholderTexture(): string {
@@ -207,34 +307,40 @@ export default class WasdScene extends Phaser.Scene {
   update(_time: number, delta: number) {
     if (!this.player) return
 
-    let vx = 0
-    let vy = 0
-    if (this.keyW?.isDown) vy -= 1
-    if (this.keyS?.isDown) vy += 1
-    if (this.keyA?.isDown) vx -= 1
-    if (this.keyD?.isDown) vx += 1
-
-    const moving = vx !== 0 || vy !== 0
-    if (moving) {
-      const len = Math.hypot(vx, vy) || 1
-      vx /= len
-      vy /= len
-      const speed = this.keyShift?.isDown ? RUN_SPEED : WALK_SPEED
-      const step = (speed * delta) / 1000
-      this.player.x += vx * step
-      this.player.y += vy * step
+    if (Phaser.Input.Keyboard.JustDown(this.keySpace)) {
+      this.tryAttack()
     }
 
-    const facing = moving
-      ? orientationFromVelocity(vx, vy)
-      : ((this.player.getData("facing") as Orientation) ?? Orientation.DOWN)
+    if (!this.attacking) {
+      let vx = 0
+      let vy = 0
+      if (this.keyW?.isDown) vy -= 1
+      if (this.keyS?.isDown) vy += 1
+      if (this.keyA?.isDown) vx -= 1
+      if (this.keyD?.isDown) vx += 1
 
-    if (moving) {
-      this.player.setData("facing", facing)
-    }
+      const moving = vx !== 0 || vy !== 0
+      if (moving) {
+        const len = Math.hypot(vx, vy) || 1
+        vx /= len
+        vy /= len
+        const speed = this.keyShift?.isDown ? RUN_SPEED : WALK_SPEED
+        const step = (speed * delta) / 1000
+        this.player.x += vx * step
+        this.player.y += vy * step
+        this.clampToMap()
 
-    if (this.pokemonIndex !== "placeholder-pokemon") {
-      playFacingAnim(this.player, this.pokemonIndex, facing, moving)
+        const facing = orientationFromVelocity(vx, vy)
+        this.player.setData("facing", facing)
+
+        if (this.pokemonIndex !== "placeholder-pokemon") {
+          playFacingAnim(this.player, this.pokemonIndex, facing, true)
+        }
+      } else if (this.pokemonIndex !== "placeholder-pokemon") {
+        const facing =
+          (this.player.getData("facing") as Orientation) ?? Orientation.DOWN
+        playFacingAnim(this.player, this.pokemonIndex, facing, false)
+      }
     }
   }
 }
